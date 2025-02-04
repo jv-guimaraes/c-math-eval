@@ -3,12 +3,10 @@
 
 #include <stdbool.h>
 
-int char_to_int(char c) {
-    return c - 48;
-}
+int char_to_int(char c);
 
-bool is_digit(char c) {
-    return (c >= 48) && (c <= 57);
-}
+bool is_digit(char c);
+
+char* trim_whitespace(const char* str);
 
 #endif

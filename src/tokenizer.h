@@ -1,15 +1,10 @@
 #ifndef TOKENIZER_H
 #define TOKENIZER_H
 
-#include "util.h"
-
-typedef struct Tokenizer {
-    const char *data;
-    size_t cursor;
-} Tokenizer;
+#include <stdbool.h>
 
 typedef enum TokenType {
-    NUM, ADD, SUB, MUL, DIV
+    NUM, ADD, SUB, MUL, DIV, END, LPAREN, RPAREN
 } TokenType;
 
 typedef struct Token {
@@ -17,55 +12,28 @@ typedef struct Token {
     int value;
 } Token;
 
-Token Token_new(const char *data, size_t start, size_t end) {
-    if (is_digit(data[start])) {
-        int total = 0;
-        int magnitude = 1;
-        for (int i = end - 1; i >= (int) start; i--) {
-            total += char_to_int(data[i]) * magnitude;
-            magnitude *= 10;
-        }
-        return (Token){NUM, total};
-    } else {
-        char op = data[start];
-        switch (op) {
-            case '+': return (Token){ADD, 0};  break;
-            case '-': return (Token){SUB, 0};  break;
-            case '*': return (Token){MUL, 0}; break;
-            case '/': return (Token){DIV, 0};  break;        
-        }
-    }
-}
+typedef struct Tokens {
+    Token *data;
+    size_t size;
+    size_t cursor;
+} Tokens;
 
-void Token_print(Token t) {
-    const char *names[] = {"NUM", "ADD", "SUB", "MUL", "DIV"};
-    if (t.type == NUM) {
-        printf("{%s, %d} ", names[t.type], t.value);    
-    } else {
-        printf("{%s} ", names[t.type]);   
-    }
-}
+void Token_print(Token t);
 
-Token Tokenizer_next(Tokenizer *t) {
-    size_t start, end;
+Tokens *tokenize(const char *exp);
 
-    // Eat all the whitespace
-    start = t->cursor;
-    while (t->data[start] == ' ') {
-        start++;
-    }
+Token peek(const Tokens *tokens);
 
-    // Form the token
-    end = start;
-    while (t->data[end] != ' ' && t->data[end] != '\0') {
-        end++;
-    }
-    t->cursor = end;
-    return Token_new(t->data, start, end);
-}
+Token next(Tokens *tokens);
 
-bool Tokenizer_done(Tokenizer *t) {
-    return t->data[t->cursor] == '\0';
-}
+void Tokens_print(Tokens *tokens);
+
+bool match(Tokens *tokens, TokenType type);
+
+bool match_value(Tokens *tokens, TokenType type, int *value);
+
+void check(bool condition, const char *msg);
+
+TokenType previous_token(Tokens *tokens);
 
 #endif
