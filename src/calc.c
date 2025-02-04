@@ -24,12 +24,12 @@ int base() {
 
 int mult() {
     int res = base();
-    while(match(tokens, MUL) || match(tokens, DIV)) {
+    while (match(tokens, MUL) || match(tokens, DIV)) {
         TokenType type = previous_token(tokens);
         if (type == MUL) {
-            res *= mult();
+            res *= base();
         } else {
-            res /= mult();
+            res /= base();
         }
     }
     return res;
@@ -37,12 +37,12 @@ int mult() {
 
 int add() {
     int res = mult();
-    while(match(tokens, ADD) || match(tokens, SUB)) {
+    while (match(tokens, ADD) || match(tokens, SUB)) {
         TokenType type = previous_token(tokens);
         if (type == ADD) {
-            res += add();
+            res += mult();
         } else {
-            res -= add();
+            res -= mult();
         }
     }
     return res;
@@ -141,24 +141,27 @@ void test_sub_div() {
     assert(eval("10 - 4 * 2") == 2); // Precedence: multiplication before subtraction
     assert(eval("15 / 3 + 2") == 7); // Precedence: division before addition
     assert(eval("10 + 4 - 2") == 12);
-    assert(eval("15 * 3 / 5") == 9);
+    assert(eval("15 * 3 / 5") == 9); // 45 / 5 = 9
 
     // Parentheses handling
     assert(eval("(10 - 4) + 2") == 8);
     assert(eval("10 - (4 + 2)") == 4);
     assert(eval("(15 / 3) * 2") == 10);
-    assert(eval("15 / (3 * 2)") == 2); // Precedence: parentheses first
+    assert(eval("15 / (3 * 2)") == 2); // 15 / 6 = 2 (integer division)
     assert(eval("(10 + 4) - 2") == 12);
     assert(eval("10 + (4 - 2)") == 12);
-    assert(eval("(15 * 3) / 5") == 9);
-    assert(eval("15 * (3 / 5)") == 9);
+    assert(eval("(15 * 3) / 5") == 9); // 45 / 5 = 9
+    assert(eval("15 * (3 / 5)") == 0); // 3 / 5 = 0, then 15 * 0 = 0
 
     // Division edge cases
     assert(eval("10 / 2") == 5);
     assert(eval("10 / 1") == 10);
     assert(eval("0 / 5") == 0); // Division by non-zero
-    assert(eval("5 / 10") == 0); // Integer division (assuming your function uses integer division)
-    assert(eval("10 / 3") == 3); // Integer division (assuming your function uses integer division)
+    assert(eval("5 / 10") == 0); // Integer division: 5 / 10 = 0
+    assert(eval("10 / 3") == 3); // Integer division: 10 / 3 = 3
+    assert(eval("7 / 3") == 2); // Integer division: 7 / 3 = 2
+    assert(eval("3 / 5") == 0); // Integer division: 3 / 5 = 0
+    assert(eval("6 / 5") == 1); // Integer division: 6 / 5 = 1
 
     // Subtraction edge cases
     assert(eval("10 - 10") == 0);
@@ -170,19 +173,19 @@ void test_sub_div() {
     assert(eval("(10 - 4) * 2") == 12);
     assert(eval("10 - (4 * 2)") == 2);
     assert(eval("(15 / 3) - 2") == 3);
-    assert(eval("15 / (3 - 2)") == 15);
-    assert(eval("(10 + 4) / 2") == 7);
-    assert(eval("10 + (4 / 2)") == 12);
-    assert(eval("(15 * 3) - 5") == 40);
-    assert(eval("15 * (3 - 5)") == -30); // Negative result (if supported)
+    assert(eval("15 / (3 - 2)") == 15); // 15 / 1 = 15
+    assert(eval("(10 + 4) / 2") == 7); // 14 / 2 = 7
+    assert(eval("10 + (4 / 2)") == 12); // 4 / 2 = 2, then 10 + 2 = 12
+    assert(eval("(15 * 3) - 5") == 40); // 45 - 5 = 40
+    assert(eval("15 * (3 - 5)") == -30); // 3 - 5 = -2, then 15 * -2 = -30 (if supported)
 
     // Nested parentheses
-    assert(eval("((10 - 4) * 2) + 5") == 17);
-    assert(eval("10 - ((4 * 2) + 5)") == -3); // Negative result (if supported)
-    assert(eval("((15 / 3) - 2) * 4") == 12);
-    assert(eval("15 / ((3 - 2) * 5)") == 3);
-    assert(eval("((10 + 4) / 2) - 3") == 4);
-    assert(eval("10 + ((4 / 2) * 5)") == 20);
+    assert(eval("((10 - 4) * 2) + 5") == 17); // (6 * 2) + 5 = 17
+    assert(eval("10 - ((4 * 2) + 5)") == -3); // 10 - (8 + 5) = -3 (if supported)
+    assert(eval("((15 / 3) - 2) * 4") == 12); // (5 - 2) * 4 = 12
+    assert(eval("15 / ((3 - 2) * 5)") == 3); // 15 / (1 * 5) = 3
+    assert(eval("((10 + 4) / 2) - 3") == 4); // (14 / 2) - 3 = 4
+    assert(eval("10 + ((4 / 2) * 5)") == 20); // 10 + (2 * 5) = 20
 
     // Whitespace handling
     assert(eval("  10 -  4 ") == 6);
@@ -191,21 +194,16 @@ void test_sub_div() {
     assert(eval("10 - ( 4 + 2 )") == 4);
 
     // Repeated operations
-    assert(eval("10 - 4 - 2") == 4); // Left-associative subtraction
-    assert(eval("15 / 3 / 2") == 2); // Left-associative division
-    assert(eval("10 - 4 - 2 - 1") == 3);
-    assert(eval("16 / 2 / 2 / 2") == 2);
-
-    // Division by zero (if error handling is implemented)
-    // Note: If your function handles division by zero, add these tests:
-    // assert(eval("10 / 0") == ERROR); // Division by zero
-    // assert(eval("(10 - 10) / 0") == ERROR); // Division by zero
+    assert(eval("10 - 4 - 2") == 4); // Left-associative subtraction: 10 - 4 = 6, then 6 - 2 = 4
+    assert(eval("15 / 3 / 2") == 2); // Left-associative division: 15 / 3 = 5, then 5 / 2 = 2
+    assert(eval("10 - 4 - 2 - 1") == 3); // 10 - 4 = 6, 6 - 2 = 4, 4 - 1 = 3
+    assert(eval("16 / 2 / 2 / 2") == 2); // 16 / 2 = 8, 8 / 2 = 4, 4 / 2 = 2
 
     // Large numbers
     assert(eval("1000 - 500") == 500);
     assert(eval("1000 / 10") == 100);
     assert(eval("1000 - 500 + 200") == 700);
-    assert(eval("1000 / 10 * 5") == 500);
+    assert(eval("1000 / 10 * 5") == 500); // 1000 / 10 = 100, then 100 * 5 = 500
 
     // Zero handling
     assert(eval("0 - 0") == 0);
