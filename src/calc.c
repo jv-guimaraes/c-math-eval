@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <string.h>
 #include <assert.h>
+#include "calc.h"
 
 #define MAX_TOKENS 128
 
@@ -150,7 +151,7 @@ void Tokens_print(Tokens *tokens) {
     printf("\n");
 }
 
-Tokens *tokenize(const char *exp) {
+Tokens *Tokens_tokenize(const char *exp) {
     Token *tokens_array = malloc(MAX_TOKENS * sizeof(Token));
     if (!tokens_array) return NULL;
 
@@ -181,6 +182,60 @@ void Tokens_free(Tokens *tokens) {
     free(tokens);
 }
 
+// -- Syntax Tree --
+Node *Node_new(NodeType  type) {
+    Node *node = calloc(1, sizeof(Node));
+    node->type = type;
+    return node;
+}
+
+Node *Node_addChild(Node *node, Node *child) {
+    child->parent = node;
+    if (node->child == NULL) {
+        node->child = child;
+    } else {
+        Node *curr_child = node->child;
+        while (curr_child->sibling != NULL) {
+            curr_child = curr_child->sibling;
+        }
+        curr_child->sibling = child;
+    }
+    return child;
+}
+
+void Node_print(Node *node) {
+    if (node->opposite) {
+        switch(node->type) {
+            case NODE_ADD: printf("ADD(-%d)\n", node->value); break;
+            case NODE_MUL: printf("MUL(1/%d)\n", node->value); break;
+            case NODE_NUM: printf("%d\n", node->value); break;
+        }
+        return;
+    }
+    switch(node->type) {
+        case NODE_ADD: printf("ADD(%d)\n", node->value); break;
+        case NODE_MUL: printf("MUL(%d)\n", node->value); break;
+        case NODE_NUM: printf("%d\n", node->value); break;
+    }
+}
+
+void _Tree_print(Node *node, int depth) {
+    for (size_t i = 0; i < depth; i++) {
+        printf(" ");
+    }
+    Node_print(node);
+
+    Node *child = node->child;
+    while(child != NULL) {
+        _Tree_print(child, depth + 2);
+        child = child->sibling;
+    }
+}
+
+void print_tree(Node *root) {
+    _Tree_print(root, 0);
+}
+
 // --- Parser ---
 bool match(Tokens *tokens, TokenType type) {
     if (tokens->cursor < tokens->size && tokens->data[tokens->cursor].type == type) {
@@ -205,20 +260,22 @@ TokenType previous_token(Tokens *tokens) {
     return END; //Or some other default value - should not happen in correct use.
 }
 
-int add(Tokens *tokens);
+int add(Tokens *tokens, Node *node);
 
-int base(Tokens *tokens) {
+int base(Tokens *tokens, Node *node) {
     int value;
     if (match_value(tokens, NUM, &value)) {
+        node->value = value;
         return value;
     }
 
     if (match(tokens, LPAREN)) {
-        value = add(tokens);
+        value = add(tokens, Node_addChild(node, Node_new(NODE_ADD)));
         if (!match(tokens, RPAREN)) {
             fprintf(stderr, "Error: Expected RPAREN\n");
             exit(1);
         }
+        node->value = value;
         return value;
     }
 
@@ -226,35 +283,39 @@ int base(Tokens *tokens) {
     exit(1);
 }
 
-int mult(Tokens *tokens) {
-    int res = base(tokens);
+int mult(Tokens *tokens, Node *node) {
+    int res = base(tokens, Node_addChild(node, Node_new(NODE_NUM)));
     while (match(tokens, MUL) || match(tokens, DIV)) {
         TokenType type = previous_token(tokens);
         if (type == MUL) {
-            res *= base(tokens);
+            res *= base(tokens, Node_addChild(node, Node_new(NODE_NUM)));
         } else {
-            res /= base(tokens);
+            res /= base(tokens, Node_addChild(node, Node_new(NODE_NUM)));
         }
     }
+    node->value = res;
     return res;
 }
 
-int add(Tokens *tokens) {
-    int res = mult(tokens);
+int add(Tokens *tokens, Node *node) {
+    int res = mult(tokens, Node_addChild(node, Node_new(NODE_MUL)));
     while (match(tokens, ADD) || match(tokens, SUB)) {
         TokenType type = previous_token(tokens);
         if (type == ADD) {
-            res += mult(tokens);
+            res += mult(tokens, Node_addChild(node, Node_new(NODE_MUL)));
         } else {
-            res -= mult(tokens);
+            res -= mult(tokens, Node_addChild(node, Node_new(NODE_MUL)));
         }
     }
+    node->value = res;
     return res;
 }
 
-int eval(char *exp) {
-    Tokens *tokens = tokenize(trim_whitespace(exp));
-    int res = add(tokens);
+int eval(char *exp, Node **root) {
+    Tokens *tokens = Tokens_tokenize(trim_whitespace(exp));
+    *root = Node_new(ADD);
+    int res = add(tokens, *root);
+
     if (!match(tokens, END)) {
         fprintf(stderr, "Error: Expected EOF\n");
         exit(1);

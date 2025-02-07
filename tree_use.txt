@@ -1,0 +1,4 @@
+Node *node = NIL;
+
+add_child(node);
+moveto_child(node);
