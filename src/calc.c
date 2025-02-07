@@ -263,10 +263,3 @@ int eval(char *exp) {
     Tokens_free(tokens);
     return res;
 }
-
-void check(bool condition, const char *msg) {
-    if (!condition) {
-        fprintf(stderr, msg);
-        exit(1);
-    }
-}

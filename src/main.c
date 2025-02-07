@@ -149,7 +149,6 @@ void test_sub_div() {
     printf("All sub and div tests are passing!\n");
 }
 
-// --- Main ---
 int main() {
     test_add_mul();
     test_sub_div();
