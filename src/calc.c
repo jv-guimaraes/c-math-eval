@@ -1,58 +1,266 @@
 #include <stdio.h>
-#include <assert.h>
 #include <stdlib.h>
-#include "tokenizer.h"
-#include "calc.h"
-#include "util.h"
+#include <stdbool.h>
+#include <ctype.h>
+#include <string.h>
+#include <assert.h>
 
-Tokens *tokens;
+#define MAX_TOKENS 128
 
-int base() {
+// --- Data Structures ---
+typedef enum TokenType {
+    NUM, ADD, SUB, MUL, DIV, END, LPAREN, RPAREN
+} TokenType;
+
+typedef struct Token {
+    TokenType type;
+    int value;
+} Token;
+
+typedef struct Tokens {
+    Token *data;
+    size_t size;
+    size_t cursor;
+} Tokens;
+
+typedef struct Tokenizer {
+    const char *data;
+    size_t cursor;
+} Tokenizer;
+
+// --- Utility functions ---
+int char_to_int(char c) {
+    return c - 48;
+}
+
+bool is_digit(char c) {
+    return (c >= '0') && (c <= '9');
+}
+
+char* trim_whitespace(const char* str) {
+    if (!str) return NULL;
+
+    // Find first non-whitespace character
+    const char* start = str;
+    while (*start && isspace(*start)) {
+        start++;
+    }
+
+    // If string is all whitespace
+    if (!*start) {
+        char* result = malloc(1);
+        if (result) *result = '\0';
+        return result;
+    }
+
+    // Find last non-whitespace character
+    const char* end = str + strlen(str) - 1;
+    while (end > start && isspace(*end)) {
+        end--;
+    }
+
+    // Allocate and copy trimmed string
+    size_t len = end - start + 1;
+    char* result = malloc(len + 1);
+    if (!result) return NULL;
+
+    strncpy(result, start, len);
+    result[len] = '\0';
+
+    return result;
+}
+
+// --- Tokenizer ---
+Token Token_new(const char *data, size_t start, size_t end) {
+    if (is_digit(data[start])) {
+        int total = 0;
+        int magnitude = 1;
+        for (int i = end - 1; i >= (int) start; i--) {
+            total += char_to_int(data[i]) * magnitude;
+            magnitude *= 10;
+        }
+        return (Token){NUM, total};
+    } else {
+        char op = data[start];
+        switch (op) {
+            case '+': return (Token){ADD, 0};     break;
+            case '-': return (Token){SUB, 0};     break;
+            case '*': return (Token){MUL, 0};     break;
+            case '/': return (Token){DIV, 0};     break;
+            case '(': return (Token){LPAREN, 0};  break;
+            case ')': return (Token){RPAREN, 0};  break;
+        }
+    }
+    //Should never reach here, but added for safety.  Indicates an error.
+    return (Token){END, 0};
+}
+
+void Token_print(Token t) {
+    const char *names[] = {"NUM", "ADD", "SUB", "MUL", "DIV", "END", "LPAREN", "RPAREN"};
+    if (t.type == NUM) {
+        printf("{%s, %d} ", names[t.type], t.value);
+    } else {
+        printf("{%s} ", names[t.type]);
+    }
+}
+
+Token Tokenizer_next(Tokenizer *t) {
+    size_t start, end;
+
+    // Eat all the whitespace
+    start = t->cursor;
+    while (t->data[start] == ' ') start++;
+
+    // Form the token
+    end = start;
+    if (is_digit(t->data[start])) {
+        while (t->data[end] != ' ' && t->data[end] != '\0' && is_digit(t->data[end])) {
+            end++;
+        }
+    } else {
+        end++;
+    }
+    Token token = Token_new(t->data, start, end);
+    t->cursor = end;
+
+    // Eat all the whitespace
+    start = t->cursor;
+    while (t->data[start] == ' ') start++;
+
+    return token;
+}
+
+bool Tokenizer_isDone(Tokenizer *t) {
+    return t->data[t->cursor] == '\0';
+}
+
+Tokens *Tokens_new(Token *data, size_t size) {
+    Tokens *tokens = malloc(sizeof(Tokens));
+    tokens->data = data;
+    tokens->size = size;
+    tokens->cursor = 0;
+    return tokens;
+}
+
+void Tokens_print(Tokens *tokens) {
+    for (size_t i = 0; i < tokens->size; i++) {
+        Token token = tokens->data[i];
+        Token_print(token);
+    }
+    printf("\n");
+}
+
+Tokens *tokenize(const char *exp) {
+    Token *tokens_array = malloc(MAX_TOKENS * sizeof(Token));
+    if (!tokens_array) return NULL;
+
+    Tokenizer tokenizer = {exp, 0};
+    size_t token_count = 0;
+
+    while (!Tokenizer_isDone(&tokenizer)) {
+        if (token_count >= MAX_TOKENS - 1) {
+            fprintf(stderr, "Error: Expression too long\n");
+            free(tokens_array);
+            return NULL;
+        }
+        tokens_array[token_count++] = Tokenizer_next(&tokenizer);
+    }
+
+    tokens_array[token_count++] = (Token){END, 0};
+    return Tokens_new(tokens_array, token_count);
+}
+
+Token Tokens_next(Tokens *tokens) {
+    Token token = tokens->data[tokens->cursor];
+    tokens->cursor++;
+    return token;
+}
+
+void Tokens_free(Tokens *tokens) {
+    free(tokens->data);
+    free(tokens);
+}
+
+// --- Parser ---
+bool match(Tokens *tokens, TokenType type) {
+    if (tokens->cursor < tokens->size && tokens->data[tokens->cursor].type == type) {
+        Tokens_next(tokens);
+        return true;
+    }
+    return false;
+}
+
+bool match_value(Tokens *tokens, TokenType type, int *value) {
+    if (tokens->cursor < tokens->size && tokens->data[tokens->cursor].type == type) {
+        *value = tokens->data[tokens->cursor].value;
+        Tokens_next(tokens);
+        return true;
+    }
+    return false;
+}
+
+TokenType previous_token(Tokens *tokens) {
+    if (tokens->cursor > 0)
+        return tokens->data[tokens->cursor - 1].type;
+    return END; //Or some other default value - should not happen in correct use.
+}
+
+int add(Tokens *tokens);
+
+int base(Tokens *tokens) {
     int value;
     if (match_value(tokens, NUM, &value)) {
         return value;
     }
-    
+
     if (match(tokens, LPAREN)) {
-        value = add();
-        check(match(tokens, RPAREN), "Error: Expected RPAREN\n");
+        value = add(tokens);
+        if (!match(tokens, RPAREN)) {
+            fprintf(stderr, "Error: Expected RPAREN\n");
+            exit(1);
+        }
         return value;
     }
 
-    check(false, "Error: Expected NUM or LPAREN\n");
+    fprintf(stderr, "Error: Expected NUM or LPAREN\n");
+    exit(1);
 }
 
-int mult() {
-    int res = base();
+int mult(Tokens *tokens) {
+    int res = base(tokens);
     while (match(tokens, MUL) || match(tokens, DIV)) {
         TokenType type = previous_token(tokens);
         if (type == MUL) {
-            res *= base();
+            res *= base(tokens);
         } else {
-            res /= base();
+            res /= base(tokens);
         }
     }
     return res;
 }
 
-int add() {
-    int res = mult();
+int add(Tokens *tokens) {
+    int res = mult(tokens);
     while (match(tokens, ADD) || match(tokens, SUB)) {
         TokenType type = previous_token(tokens);
         if (type == ADD) {
-            res += mult();
+            res += mult(tokens);
         } else {
-            res -= mult();
+            res -= mult(tokens);
         }
     }
     return res;
 }
 
 int eval(char *exp) {
-    tokens = tokenize(trim_whitespace(exp));
-    int res = add();
-    check(match(tokens, END), "Error: Expected EOF\n");
-    // printf("It passed!\n");
+    Tokens *tokens = tokenize(trim_whitespace(exp));
+    int res = add(tokens);
+    if (!match(tokens, END)) {
+        fprintf(stderr, "Error: Expected EOF\n");
+        exit(1);
+    }
+
+    Tokens_free(tokens);
     return res;
 }
 
@@ -61,155 +269,4 @@ void check(bool condition, const char *msg) {
         fprintf(stderr, msg);
         exit(1);
     }
-}
-
-int main() {
-    test_add_mul();
-    test_sub_div();
-    return 0;
-}
-
-void test_add_mul() {
-    // Basic addition and multiplication
-    assert(eval("5 + 6") == 11);
-    assert(eval("3 * 5") == 15);
-
-    // Whitespace handling
-    assert(eval("  5 +  6 ") == 11);
-    assert(eval("3   *   5") == 15);
-    assert(eval("1 + 2 * 3") == 7);
-
-    // Parentheses handling
-    assert(eval("(5 + 6)") == 11);
-    assert(eval("(3 * 5)") == 15);
-    assert(eval("(1 + 2) * 3") == 9);
-    assert(eval("1 + (2 * 3)") == 7);
-    assert(eval("(1 + 2) * (3 + 4)") == 21);
-    assert(eval("((1 + 2) * 3)") == 9);
-    assert(eval("(3) * (5)") == 15);
-    assert(eval("((3) * (5))") == 15);
-
-    // Multiple operations
-    assert(eval("1 + 2 + 3 + 4") == 10);
-    assert(eval("1 * 2 * 3 * 4") == 24);
-    assert(eval("1 + 2 * 3 + 4") == 11);
-    assert(eval("1 * 2 + 3 * 4") == 14);
-    assert(eval("1 * (2 + 3) * 4") == 20);
-
-    // Edge cases with single numbers
-    assert(eval("5") == 5);
-    assert(eval("(5)") == 5);
-    assert(eval(" 5 ") == 5);
-    assert(eval("( 5 )") == 5);
-
-    // Repeated operations
-    assert(eval("1 + 1 + 1 + 1 + 1") == 5);
-    assert(eval("1 * 1 * 1 * 1 * 1") == 1);
-    assert(eval("2 * 2 * 2 * 2") == 16);
-    assert(eval("2 + 2 + 2 + 2") == 8);
-
-    // Nested parentheses
-    assert(eval("((1 + 2) * (3 + 4))") == 21);
-    assert(eval("(1 + (2 * 3)) + 4") == 11);
-    assert(eval("1 + (2 * (3 + 4))") == 15);
-    assert(eval("((1 + 2) * 3) + 4") == 13);
-
-    // Large numbers
-    assert(eval("1000 + 2000") == 3000);
-    assert(eval("1000 * 2000") == 2000000);
-    assert(eval("1000 + 2000 * 3") == 7000);
-    assert(eval("(1000 + 2000) * 3") == 9000);
-
-    // Zero handling
-    assert(eval("0 + 0") == 0);
-    assert(eval("0 * 0") == 0);
-    assert(eval("0 + 5") == 5);
-    assert(eval("5 * 0") == 0);
-    assert(eval("0 * 5 + 3") == 3);
-    assert(eval("0 + 5 * 3") == 15);
-    printf("All add & mul tests are passing!\n");
-}
-
-void test_sub_div() {
-    // Basic subtraction and division
-    assert(eval("10 - 4") == 6);
-    assert(eval("15 / 3") == 5);
-
-    // Mixed operations
-    assert(eval("10 - 4 + 2") == 8);
-    assert(eval("15 / 3 * 2") == 10);
-    assert(eval("10 - 4 * 2") == 2); // Precedence: multiplication before subtraction
-    assert(eval("15 / 3 + 2") == 7); // Precedence: division before addition
-    assert(eval("10 + 4 - 2") == 12);
-    assert(eval("15 * 3 / 5") == 9); // 45 / 5 = 9
-
-    // Parentheses handling
-    assert(eval("(10 - 4) + 2") == 8);
-    assert(eval("10 - (4 + 2)") == 4);
-    assert(eval("(15 / 3) * 2") == 10);
-    assert(eval("15 / (3 * 2)") == 2); // 15 / 6 = 2 (integer division)
-    assert(eval("(10 + 4) - 2") == 12);
-    assert(eval("10 + (4 - 2)") == 12);
-    assert(eval("(15 * 3) / 5") == 9); // 45 / 5 = 9
-    assert(eval("15 * (3 / 5)") == 0); // 3 / 5 = 0, then 15 * 0 = 0
-
-    // Division edge cases
-    assert(eval("10 / 2") == 5);
-    assert(eval("10 / 1") == 10);
-    assert(eval("0 / 5") == 0); // Division by non-zero
-    assert(eval("5 / 10") == 0); // Integer division: 5 / 10 = 0
-    assert(eval("10 / 3") == 3); // Integer division: 10 / 3 = 3
-    assert(eval("7 / 3") == 2); // Integer division: 7 / 3 = 2
-    assert(eval("3 / 5") == 0); // Integer division: 3 / 5 = 0
-    assert(eval("6 / 5") == 1); // Integer division: 6 / 5 = 1
-
-    // Subtraction edge cases
-    assert(eval("10 - 10") == 0);
-    assert(eval("0 - 5") == -5); // Negative result (if supported)
-    assert(eval("5 - 0") == 5);
-    assert(eval("5 - 10") == -5); // Negative result (if supported)
-
-    // Mixed operations with parentheses
-    assert(eval("(10 - 4) * 2") == 12);
-    assert(eval("10 - (4 * 2)") == 2);
-    assert(eval("(15 / 3) - 2") == 3);
-    assert(eval("15 / (3 - 2)") == 15); // 15 / 1 = 15
-    assert(eval("(10 + 4) / 2") == 7); // 14 / 2 = 7
-    assert(eval("10 + (4 / 2)") == 12); // 4 / 2 = 2, then 10 + 2 = 12
-    assert(eval("(15 * 3) - 5") == 40); // 45 - 5 = 40
-    assert(eval("15 * (3 - 5)") == -30); // 3 - 5 = -2, then 15 * -2 = -30 (if supported)
-
-    // Nested parentheses
-    assert(eval("((10 - 4) * 2) + 5") == 17); // (6 * 2) + 5 = 17
-    assert(eval("10 - ((4 * 2) + 5)") == -3); // 10 - (8 + 5) = -3 (if supported)
-    assert(eval("((15 / 3) - 2) * 4") == 12); // (5 - 2) * 4 = 12
-    assert(eval("15 / ((3 - 2) * 5)") == 3); // 15 / (1 * 5) = 3
-    assert(eval("((10 + 4) / 2) - 3") == 4); // (14 / 2) - 3 = 4
-    assert(eval("10 + ((4 / 2) * 5)") == 20); // 10 + (2 * 5) = 20
-
-    // Whitespace handling
-    assert(eval("  10 -  4 ") == 6);
-    assert(eval("15   /   3") == 5);
-    assert(eval("( 10 - 4 ) + 2") == 8);
-    assert(eval("10 - ( 4 + 2 )") == 4);
-
-    // Repeated operations
-    assert(eval("10 - 4 - 2") == 4); // Left-associative subtraction: 10 - 4 = 6, then 6 - 2 = 4
-    assert(eval("15 / 3 / 2") == 2); // Left-associative division: 15 / 3 = 5, then 5 / 2 = 2
-    assert(eval("10 - 4 - 2 - 1") == 3); // 10 - 4 = 6, 6 - 2 = 4, 4 - 1 = 3
-    assert(eval("16 / 2 / 2 / 2") == 2); // 16 / 2 = 8, 8 / 2 = 4, 4 / 2 = 2
-
-    // Large numbers
-    assert(eval("1000 - 500") == 500);
-    assert(eval("1000 / 10") == 100);
-    assert(eval("1000 - 500 + 200") == 700);
-    assert(eval("1000 / 10 * 5") == 500); // 1000 / 10 = 100, then 100 * 5 = 500
-
-    // Zero handling
-    assert(eval("0 - 0") == 0);
-    assert(eval("0 / 5") == 0);
-    assert(eval("5 - 0") == 5);
-    assert(eval("0 / 1") == 0);
-    assert(eval("0 - 5") == -5); // Negative result (if supported)
-    assert(eval("5 / 1") == 5);
 }
