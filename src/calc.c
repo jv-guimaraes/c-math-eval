@@ -204,36 +204,68 @@ Node *Node_addChild(Node *node, Node *child) {
 }
 
 void Node_print(Node *node) {
-    if (node->opposite) {
-        switch(node->type) {
-            case NODE_ADD: printf("ADD(-%d)\n", node->value); break;
-            case NODE_MUL: printf("MUL(1/%d)\n", node->value); break;
-            case NODE_NUM: printf("%d\n", node->value); break;
-        }
-        return;
+    char buff[32];
+    switch(node->valueType) {
+        case NORMAL: sprintf(buff, "%d", node->value); break;
+        case OPPOSITE: sprintf(buff, "-%d", node->value); break;
+        case RECIPROCAL: sprintf(buff, "1/%d", node->value); break;
     }
+
     switch(node->type) {
-        case NODE_ADD: printf("ADD(%d)\n", node->value); break;
-        case NODE_MUL: printf("MUL(%d)\n", node->value); break;
-        case NODE_NUM: printf("%d\n", node->value); break;
+        case NODE_ADD: printf("ADD(%s)\n", buff); break;
+        case NODE_MUL: printf("MUL(%s)\n", buff); break;
+        case NODE_NUM: printf("%s\n", buff); break;
     }
 }
 
-void _Tree_print(Node *node, int depth) {
+void Node_print_ex(Node *node) {
+    char buff[64] = {0};
+    size_t offset = 0;
+
+    switch (node->type) {
+        case NODE_NUM: snprintf(buff, sizeof(buff), "%d", node->value); break;
+        case NODE_ADD:
+        case NODE_MUL: {
+            Node *child = node->child;
+            offset += snprintf(buff + offset, sizeof(buff) - offset, "%d", child->value);
+            child = child->sibling;
+
+            while (child != NULL) {
+                char op;
+                if (node->type == NODE_ADD) {
+                    op = (child->valueType == OPPOSITE) ? '-' : '+';
+                } else { // node->type == NODE_MUL
+                    op = (child->valueType == RECIPROCAL) ? '/' : '*';
+                }
+                offset += snprintf(buff + offset, sizeof(buff) - offset, "%c%d", op, child->value);
+                child = child->sibling;
+            }
+            // snprintf(buff + offset, sizeof(buff) - offset, " = %d", node->value);
+            break;
+        }
+    }
+    printf("%s\n", buff);
+}
+
+void _print_tree(Node *node, int depth, void (*node_print_function)(Node*)) {
     for (size_t i = 0; i < depth; i++) {
         printf(" ");
     }
-    Node_print(node);
+    node_print_function(node);
 
     Node *child = node->child;
     while(child != NULL) {
-        _Tree_print(child, depth + 2);
+        _print_tree(child, depth + 2, node_print_function);
         child = child->sibling;
     }
 }
 
 void print_tree(Node *root) {
-    _Tree_print(root, 0);
+    _print_tree(root, 0, Node_print);
+}
+
+void print_tree_ex(Node *root) {
+    _print_tree(root, 0, Node_print_ex);
 }
 
 // --- Parser ---
@@ -290,7 +322,9 @@ int mult(Tokens *tokens, Node *node) {
         if (type == MUL) {
             res *= base(tokens, Node_addChild(node, Node_new(NODE_NUM)));
         } else {
-            res /= base(tokens, Node_addChild(node, Node_new(NODE_NUM)));
+            Node *child = Node_addChild(node, Node_new(NODE_NUM));
+            child->valueType = RECIPROCAL;
+            res /= base(tokens, child);
         }
     }
     node->value = res;
@@ -304,7 +338,9 @@ int add(Tokens *tokens, Node *node) {
         if (type == ADD) {
             res += mult(tokens, Node_addChild(node, Node_new(NODE_MUL)));
         } else {
-            res -= mult(tokens, Node_addChild(node, Node_new(NODE_MUL)));
+            Node *child = Node_addChild(node, Node_new(NODE_MUL));
+            child->valueType = OPPOSITE;
+            res -= mult(tokens, child);
         }
     }
     node->value = res;

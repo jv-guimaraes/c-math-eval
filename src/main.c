@@ -154,8 +154,11 @@ void test_sub_div() {
 int main() {
     test_add_mul();
     test_sub_div();
-    eval("10 / 5 - 2", &tree);
-    printf("Result: %d\n", tree->value);
+
+    char *expression = "(1+2)*3";
+    printf("%s = %d\n", expression, eval(expression, &tree));
     print_tree(tree);
+    printf("\n\n");
+    print_tree_ex(tree);
     return 0;
 }
