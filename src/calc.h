@@ -1,29 +1,34 @@
 #ifndef CALC_H
 #define CALC_H
 
-#include <stdbool.h>
-
-typedef enum NodeType {
-    NODE_NUM, NODE_ADD, NODE_MUL
+typedef enum {
+    NODE_NUMBER, NODE_BINARY_OP, NODE_UNARY_OP
 } NodeType;
 
-typedef enum NodeValueType {
-    NORMAL, OPPOSITE, RECIPROCAL
-} NodeValueType;
-
-typedef struct Node {
+typedef struct ASTNode {
     NodeType type;
-    int value;
-    NodeValueType valueType;
-    struct Node *parent;
-    struct Node *child;
-    struct Node *sibling;
-} Node;
+    union {
+        double number;  // For NUMBER nodes
+        struct {       // For BINARY_OP nodes
+            char operator;
+            struct ASTNode* left;
+            struct ASTNode* right;
+        } binary;
+        struct {       // For UNARY_OP nodes
+            char operator;
+            struct ASTNode* operand;
+        } unary;
+    };
+} ASTNode;
 
-int eval(char *exp, Node **root);
+ASTNode *ast_build(const char* expression);
 
-void print_tree(Node *root);
+void ast_print(ASTNode* node, int depth);
 
-void print_tree_ex(Node *root);
+void ast_free(ASTNode* node);
+
+double ast_eval(ASTNode* node);
+
+double eval(const char* expression);
 
 #endif

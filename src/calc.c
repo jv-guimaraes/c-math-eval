@@ -1,362 +1,299 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
-#include <ctype.h>
 #include <string.h>
+#include <ctype.h>
 #include <assert.h>
+#include <stdbool.h>
 #include "calc.h"
 
-#define MAX_TOKENS 128
-
-// --- Data Structures ---
-typedef enum TokenType {
-    NUM, ADD, SUB, MUL, DIV, END, LPAREN, RPAREN
+/* ===== Lexer ===== */
+typedef enum {
+    TOKEN_NUMBER, TOKEN_PLUS, TOKEN_MINUS, TOKEN_MULTIPLY, TOKEN_DIVIDE,
+    TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_EOF, TOKEN_ERROR
 } TokenType;
 
-typedef struct Token {
+typedef struct {
     TokenType type;
-    int value;
+    double value;
 } Token;
 
-typedef struct Tokens {
-    Token *data;
-    size_t size;
-    size_t cursor;
-} Tokens;
+typedef struct {
+    const char* input;
+    int position;
+    char curr_char;
+} Lexer;
 
-typedef struct Tokenizer {
-    const char *data;
-    size_t cursor;
-} Tokenizer;
-
-// --- Utility functions ---
-int char_to_int(char c) {
-    return c - 48;
+Lexer* lexer_create(const char* input) {
+    Lexer* lexer = malloc(sizeof(Lexer));
+    lexer->input = input;
+    lexer->position = 0;
+    lexer->curr_char = input[0];
+    return lexer;
 }
 
-bool is_digit(char c) {
-    return (c >= '0') && (c <= '9');
-}
-
-char* trim_whitespace(const char* str) {
-    if (!str) return NULL;
-
-    // Find first non-whitespace character
-    const char* start = str;
-    while (*start && isspace(*start)) {
-        start++;
-    }
-
-    // If string is all whitespace
-    if (!*start) {
-        char* result = malloc(1);
-        if (result) *result = '\0';
-        return result;
-    }
-
-    // Find last non-whitespace character
-    const char* end = str + strlen(str) - 1;
-    while (end > start && isspace(*end)) {
-        end--;
-    }
-
-    // Allocate and copy trimmed string
-    size_t len = end - start + 1;
-    char* result = malloc(len + 1);
-    if (!result) return NULL;
-
-    strncpy(result, start, len);
-    result[len] = '\0';
-
-    return result;
-}
-
-// --- Tokenizer ---
-Token Token_new(const char *data, size_t start, size_t end) {
-    if (is_digit(data[start])) {
-        int total = 0;
-        int magnitude = 1;
-        for (int i = end - 1; i >= (int) start; i--) {
-            total += char_to_int(data[i]) * magnitude;
-            magnitude *= 10;
-        }
-        return (Token){NUM, total};
+void lexer_advance(Lexer* lexer) {
+    lexer->position++;
+    if (lexer->position < strlen(lexer->input)) {
+        lexer->curr_char = lexer->input[lexer->position];
     } else {
-        char op = data[start];
-        switch (op) {
-            case '+': return (Token){ADD, 0};     break;
-            case '-': return (Token){SUB, 0};     break;
-            case '*': return (Token){MUL, 0};     break;
-            case '/': return (Token){DIV, 0};     break;
-            case '(': return (Token){LPAREN, 0};  break;
-            case ')': return (Token){RPAREN, 0};  break;
+        lexer->curr_char = '\0';
+    }
+}
+
+void lexer_skip_whitespace(Lexer* lexer) {
+    while (lexer->curr_char != '\0' && isspace(lexer->curr_char)) {
+        lexer_advance(lexer);
+    }
+}
+
+Token lexer_get_number(Lexer* lexer) {
+    char number[256] = {0};
+    int i = 0;
+    bool has_decimal = false;
+    
+    while (lexer->curr_char != '\0' && (isdigit(lexer->curr_char) || (lexer->curr_char == '.' && !has_decimal))) {
+        if (lexer->curr_char == '.') {
+            has_decimal = true;
+        }
+        number[i++] = lexer->curr_char;
+        lexer_advance(lexer);
+    }
+    
+    return (Token){TOKEN_NUMBER, atof(number)};
+}
+
+Token lexer_get_next_token(Lexer* lexer) {
+    while (lexer->curr_char != '\0') {
+        if (isspace(lexer->curr_char)) {
+            lexer_skip_whitespace(lexer);
+            continue;
+        }
+        
+        if (isdigit(lexer->curr_char) || lexer->curr_char == '.') {
+            return lexer_get_number(lexer);
+        }
+        
+        switch (lexer->curr_char) {
+            case '+':
+                lexer_advance(lexer);
+                return (Token){TOKEN_PLUS, 0};
+            case '-':
+                lexer_advance(lexer);
+                return (Token){TOKEN_MINUS, 0};
+            case '*':
+                lexer_advance(lexer);
+                return (Token){TOKEN_MULTIPLY, 0};
+            case '/':
+                lexer_advance(lexer);
+                return (Token){TOKEN_DIVIDE, 0};
+            case '(':
+                lexer_advance(lexer);
+                return (Token){TOKEN_LPAREN, 0};
+            case ')':
+                lexer_advance(lexer);
+                return (Token){TOKEN_RPAREN, 0};
+            default:
+                return (Token){TOKEN_ERROR, 0};
         }
     }
-    //Should never reach here, but added for safety.  Indicates an error.
-    return (Token){END, 0};
+    return (Token){TOKEN_EOF, 0};
 }
 
-void Token_print(Token t) {
-    const char *names[] = {"NUM", "ADD", "SUB", "MUL", "DIV", "END", "LPAREN", "RPAREN"};
-    if (t.type == NUM) {
-        printf("{%s, %d} ", names[t.type], t.value);
-    } else {
-        printf("{%s} ", names[t.type]);
-    }
-}
+/* ===== Recursive descent parser ===== */
+typedef struct {
+    Lexer* lexer;
+    Token curr_token;
+} Parser;
 
-Token Tokenizer_next(Tokenizer *t) {
-    size_t start, end;
-
-    // Eat all the whitespace
-    start = t->cursor;
-    while (t->data[start] == ' ') start++;
-
-    // Form the token
-    end = start;
-    if (is_digit(t->data[start])) {
-        while (t->data[end] != ' ' && t->data[end] != '\0' && is_digit(t->data[end])) {
-            end++;
-        }
-    } else {
-        end++;
-    }
-    Token token = Token_new(t->data, start, end);
-    t->cursor = end;
-
-    // Eat all the whitespace
-    start = t->cursor;
-    while (t->data[start] == ' ') start++;
-
-    return token;
-}
-
-bool Tokenizer_isDone(Tokenizer *t) {
-    return t->data[t->cursor] == '\0';
-}
-
-Tokens *Tokens_new(Token *data, size_t size) {
-    Tokens *tokens = malloc(sizeof(Tokens));
-    tokens->data = data;
-    tokens->size = size;
-    tokens->cursor = 0;
-    return tokens;
-}
-
-void Tokens_print(Tokens *tokens) {
-    for (size_t i = 0; i < tokens->size; i++) {
-        Token token = tokens->data[i];
-        Token_print(token);
-    }
-    printf("\n");
-}
-
-Tokens *Tokens_tokenize(const char *exp) {
-    Token *tokens_array = malloc(MAX_TOKENS * sizeof(Token));
-    if (!tokens_array) return NULL;
-
-    Tokenizer tokenizer = {exp, 0};
-    size_t token_count = 0;
-
-    while (!Tokenizer_isDone(&tokenizer)) {
-        if (token_count >= MAX_TOKENS - 1) {
-            fprintf(stderr, "Error: Expression too long\n");
-            free(tokens_array);
-            return NULL;
-        }
-        tokens_array[token_count++] = Tokenizer_next(&tokenizer);
-    }
-
-    tokens_array[token_count++] = (Token){END, 0};
-    return Tokens_new(tokens_array, token_count);
-}
-
-Token Tokens_next(Tokens *tokens) {
-    Token token = tokens->data[tokens->cursor];
-    tokens->cursor++;
-    return token;
-}
-
-void Tokens_free(Tokens *tokens) {
-    free(tokens->data);
-    free(tokens);
-}
-
-// -- Syntax Tree --
-Node *Node_new(NodeType  type) {
-    Node *node = calloc(1, sizeof(Node));
-    node->type = type;
+ASTNode* astnode_create_number(double value) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_NUMBER;
+    node->number = value;
     return node;
 }
 
-Node *Node_addChild(Node *node, Node *child) {
-    child->parent = node;
-    if (node->child == NULL) {
-        node->child = child;
+ASTNode* astnode_create_binary(char op, ASTNode* left, ASTNode* right) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_BINARY_OP;
+    node->binary.operator = op;
+    node->binary.left = left;
+    node->binary.right = right;
+    return node;
+}
+
+ASTNode* astnode_create_unary(char op, ASTNode* operand) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_UNARY_OP;
+    node->unary.operator = op;
+    node->unary.operand = operand;
+    return node;
+}
+
+Parser* parser_create(Lexer* lexer) {
+    Parser* parser = malloc(sizeof(Parser));
+    parser->lexer = lexer;
+    parser->curr_token = lexer_get_next_token(lexer);
+    return parser;
+}
+
+void parser_eat(Parser* parser, TokenType token_type) {
+    if (parser->curr_token.type == token_type) {
+        parser->curr_token = lexer_get_next_token(parser->lexer);
     } else {
-        Node *curr_child = node->child;
-        while (curr_child->sibling != NULL) {
-            curr_child = curr_child->sibling;
-        }
-        curr_child->sibling = child;
-    }
-    return child;
-}
-
-void Node_print(Node *node) {
-    char buff[32];
-    switch(node->valueType) {
-        case NORMAL: sprintf(buff, "%d", node->value); break;
-        case OPPOSITE: sprintf(buff, "-%d", node->value); break;
-        case RECIPROCAL: sprintf(buff, "1/%d", node->value); break;
-    }
-
-    switch(node->type) {
-        case NODE_ADD: printf("ADD(%s)\n", buff); break;
-        case NODE_MUL: printf("MUL(%s)\n", buff); break;
-        case NODE_NUM: printf("%s\n", buff); break;
-    }
-}
-
-void Node_print_ex(Node *node) {
-    char buff[64] = {0};
-    size_t offset = 0;
-
-    switch (node->type) {
-        case NODE_NUM: snprintf(buff, sizeof(buff), "%d", node->value); break;
-        case NODE_ADD:
-        case NODE_MUL: {
-            Node *child = node->child;
-            offset += snprintf(buff + offset, sizeof(buff) - offset, "%d", child->value);
-            child = child->sibling;
-
-            while (child != NULL) {
-                char op;
-                if (node->type == NODE_ADD) {
-                    op = (child->valueType == OPPOSITE) ? '-' : '+';
-                } else { // node->type == NODE_MUL
-                    op = (child->valueType == RECIPROCAL) ? '/' : '*';
-                }
-                offset += snprintf(buff + offset, sizeof(buff) - offset, "%c%d", op, child->value);
-                child = child->sibling;
-            }
-            // snprintf(buff + offset, sizeof(buff) - offset, " = %d", node->value);
-            break;
-        }
-    }
-    printf("%s\n", buff);
-}
-
-void _print_tree(Node *node, int depth, void (*node_print_function)(Node*)) {
-    for (size_t i = 0; i < depth; i++) {
-        printf(" ");
-    }
-    node_print_function(node);
-
-    Node *child = node->child;
-    while(child != NULL) {
-        _print_tree(child, depth + 2, node_print_function);
-        child = child->sibling;
-    }
-}
-
-void print_tree(Node *root) {
-    _print_tree(root, 0, Node_print);
-}
-
-void print_tree_ex(Node *root) {
-    _print_tree(root, 0, Node_print_ex);
-}
-
-// --- Parser ---
-bool match(Tokens *tokens, TokenType type) {
-    if (tokens->cursor < tokens->size && tokens->data[tokens->cursor].type == type) {
-        Tokens_next(tokens);
-        return true;
-    }
-    return false;
-}
-
-bool match_value(Tokens *tokens, TokenType type, int *value) {
-    if (tokens->cursor < tokens->size && tokens->data[tokens->cursor].type == type) {
-        *value = tokens->data[tokens->cursor].value;
-        Tokens_next(tokens);
-        return true;
-    }
-    return false;
-}
-
-TokenType previous_token(Tokens *tokens) {
-    if (tokens->cursor > 0)
-        return tokens->data[tokens->cursor - 1].type;
-    return END; //Or some other default value - should not happen in correct use.
-}
-
-int add(Tokens *tokens, Node *node);
-
-int base(Tokens *tokens, Node *node) {
-    int value;
-    if (match_value(tokens, NUM, &value)) {
-        node->value = value;
-        return value;
-    }
-
-    if (match(tokens, LPAREN)) {
-        value = add(tokens, Node_addChild(node, Node_new(NODE_ADD)));
-        if (!match(tokens, RPAREN)) {
-            fprintf(stderr, "Error: Expected RPAREN\n");
-            exit(1);
-        }
-        node->value = value;
-        return value;
-    }
-
-    fprintf(stderr, "Error: Expected NUM or LPAREN\n");
-    exit(1);
-}
-
-int mult(Tokens *tokens, Node *node) {
-    int res = base(tokens, Node_addChild(node, Node_new(NODE_NUM)));
-    while (match(tokens, MUL) || match(tokens, DIV)) {
-        TokenType type = previous_token(tokens);
-        if (type == MUL) {
-            res *= base(tokens, Node_addChild(node, Node_new(NODE_NUM)));
-        } else {
-            Node *child = Node_addChild(node, Node_new(NODE_NUM));
-            child->valueType = RECIPROCAL;
-            res /= base(tokens, child);
-        }
-    }
-    node->value = res;
-    return res;
-}
-
-int add(Tokens *tokens, Node *node) {
-    int res = mult(tokens, Node_addChild(node, Node_new(NODE_MUL)));
-    while (match(tokens, ADD) || match(tokens, SUB)) {
-        TokenType type = previous_token(tokens);
-        if (type == ADD) {
-            res += mult(tokens, Node_addChild(node, Node_new(NODE_MUL)));
-        } else {
-            Node *child = Node_addChild(node, Node_new(NODE_MUL));
-            child->valueType = OPPOSITE;
-            res -= mult(tokens, child);
-        }
-    }
-    node->value = res;
-    return res;
-}
-
-int eval(char *exp, Node **root) {
-    Tokens *tokens = Tokens_tokenize(trim_whitespace(exp));
-    *root = Node_new(ADD);
-    int res = add(tokens, *root);
-
-    if (!match(tokens, END)) {
-        fprintf(stderr, "Error: Expected EOF\n");
+        fprintf(stderr, "Syntax error\n");
         exit(1);
     }
+}
 
-    Tokens_free(tokens);
-    return res;
+ASTNode* parser_expr(Parser* parser);
+
+ASTNode* parser_factor(Parser* parser) {
+    Token token = parser->curr_token;
+    ASTNode* node;
+    
+    switch (token.type) {
+        case TOKEN_NUMBER:
+            parser_eat(parser, TOKEN_NUMBER);
+            return astnode_create_number(token.value);
+            
+        case TOKEN_LPAREN:
+            parser_eat(parser, TOKEN_LPAREN);
+            node = parser_expr(parser);
+            parser_eat(parser, TOKEN_RPAREN);
+            return node;
+            
+        case TOKEN_MINUS:
+            parser_eat(parser, TOKEN_MINUS);
+            return astnode_create_unary('-', parser_factor(parser));
+            
+        default:
+            fprintf(stderr, "Syntax error in factor\n");
+            exit(1);
+    }
+}
+
+ASTNode* parser_term(Parser* parser) {
+    ASTNode* node = parser_factor(parser);
+    
+    while (parser->curr_token.type == TOKEN_MULTIPLY || parser->curr_token.type == TOKEN_DIVIDE) {
+        Token token = parser->curr_token;
+        char op = (token.type == TOKEN_MULTIPLY) ? '*' : '/';
+        parser_eat(parser, token.type);
+        node = astnode_create_binary(op, node, parser_factor(parser));
+    }
+    
+    return node;
+}
+
+ASTNode* parser_expr(Parser* parser) {
+    ASTNode* node = parser_term(parser);
+    
+    while (parser->curr_token.type == TOKEN_PLUS || parser->curr_token.type == TOKEN_MINUS) {
+        Token token = parser->curr_token;
+        char op = (token.type == TOKEN_PLUS) ? '+' : '-';
+        parser_eat(parser, token.type);
+        node = astnode_create_binary(op, node, parser_term(parser));
+    }
+    
+    return node;
+}
+
+void ast_print(ASTNode* node, int depth) {
+    for (int i = 0; i < depth; i++) {
+        printf("  ");
+    }
+    
+    switch (node->type) {
+        case NODE_NUMBER:
+            printf("Number: %.2f\n", node->number);
+            break;
+        case NODE_BINARY_OP:
+            printf("Binary Op: %c\n", node->binary.operator);
+            ast_print(node->binary.left, depth + 1);
+            ast_print(node->binary.right, depth + 1);
+            break;
+        case NODE_UNARY_OP:
+            printf("Unary Op: %c\n", node->unary.operator);
+            ast_print(node->unary.operand, depth + 1);
+            break;
+    }
+}
+
+double ast_eval(ASTNode* node) {
+    if (node == NULL) {
+        fprintf(stderr, "Error: NULL node in evaluation\n");
+        exit(1);
+    }
+    
+    switch (node->type) {
+        case NODE_NUMBER:
+            return node->number;   
+        case NODE_BINARY_OP: {
+            double left = ast_eval(node->binary.left);
+            double right = ast_eval(node->binary.right);
+            
+            switch (node->binary.operator) {
+                case '+': return left + right;
+                case '-': return left - right;
+                case '*': return left * right;
+                case '/':
+                    if (right == 0) {
+                        fprintf(stderr, "Error: Division by zero\n");
+                        exit(1);
+                    }
+                    return left / right;
+                default:
+                    fprintf(stderr, "Error: Unknown binary operator %c\n", node->binary.operator);
+                    exit(1);
+            }
+        }
+        case NODE_UNARY_OP: {
+            double operand = ast_eval(node->unary.operand);
+            
+            switch (node->unary.operator) {
+                case '-': return -operand;
+                default:
+                    fprintf(stderr, "Error: Unknown unary operator %c\n", node->unary.operator);
+                    exit(1);
+            }
+        }
+        default:
+            fprintf(stderr, "Error: Unknown node type\n");
+            exit(1);
+    }
+}
+
+void ast_free(ASTNode* node) {
+    if (node == NULL) return;
+    
+    switch (node->type) {
+        case NODE_BINARY_OP:
+            ast_free(node->binary.left);
+            ast_free(node->binary.right);
+            break;
+        case NODE_UNARY_OP:
+            ast_free(node->unary.operand);
+            break;
+        case NODE_NUMBER:
+            break;
+    }
+    
+    free(node);
+}
+
+ASTNode *ast_build(const char* expression) {
+    Lexer* lexer = lexer_create(expression);
+    Parser* parser = parser_create(lexer);
+    ASTNode* root = parser_expr(parser);
+
+    free(parser);
+    free(lexer);
+    return root;
+}
+
+double eval(const char* expression) {
+    ASTNode* root = ast_build(expression);
+    double result = ast_eval(root);
+    ast_free(root);
+    return result;
 }
