@@ -4,7 +4,10 @@
 #include <ctype.h>
 #include <assert.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include "calc.h"
+
+#define ALLOW_INVALID_TREE true
 
 /* ===== Lexer ===== */
 typedef enum {
@@ -19,15 +22,25 @@ typedef struct {
 
 typedef struct {
     const char* input;
-    int position;
+    size_t position;
     char curr_char;
+    size_t token_count;
+    size_t token_max;
 } Lexer;
+
+void tokentype_print(TokenType type) {
+    char *tokens[] = {"TOKEN_NUMBER", "TOKEN_PLUS", "TOKEN_MINUS", "TOKEN_MULTIPLY", "TOKEN_DIVIDE",
+        "TOKEN_LPAREN", "TOKEN_RPAREN", "TOKEN_EOF", "TOKEN_ERROR"};
+    printf("%s\n", tokens[type]);
+}
 
 Lexer* lexer_create(const char* input) {
     Lexer* lexer = malloc(sizeof(Lexer));
     lexer->input = input;
     lexer->position = 0;
     lexer->curr_char = input[0];
+    lexer->token_count = 0;
+    lexer->token_max = SIZE_MAX;
     return lexer;
 }
 
@@ -63,34 +76,35 @@ Token lexer_get_number(Lexer* lexer) {
 }
 
 Token lexer_get_next_token(Lexer* lexer) {
-    while (lexer->curr_char != '\0') {
+    while (lexer->curr_char != '\0' && lexer->token_count < lexer->token_max) {
         if (isspace(lexer->curr_char)) {
             lexer_skip_whitespace(lexer);
             continue;
         }
         
         if (isdigit(lexer->curr_char) || lexer->curr_char == '.') {
+            lexer->token_count++;
             return lexer_get_number(lexer);
         }
         
         switch (lexer->curr_char) {
             case '+':
-                lexer_advance(lexer);
+                lexer_advance(lexer); lexer->token_count++;
                 return (Token){TOKEN_PLUS, 0};
             case '-':
-                lexer_advance(lexer);
+                lexer_advance(lexer); lexer->token_count++;
                 return (Token){TOKEN_MINUS, 0};
             case '*':
-                lexer_advance(lexer);
+                lexer_advance(lexer); lexer->token_count++;
                 return (Token){TOKEN_MULTIPLY, 0};
             case '/':
-                lexer_advance(lexer);
+                lexer_advance(lexer); lexer->token_count++;
                 return (Token){TOKEN_DIVIDE, 0};
             case '(':
-                lexer_advance(lexer);
+                lexer_advance(lexer); lexer->token_count++;
                 return (Token){TOKEN_LPAREN, 0};
             case ')':
-                lexer_advance(lexer);
+                lexer_advance(lexer); lexer->token_count++;
                 return (Token){TOKEN_RPAREN, 0};
             default:
                 return (Token){TOKEN_ERROR, 0};
@@ -103,7 +117,27 @@ Token lexer_get_next_token(Lexer* lexer) {
 typedef struct {
     Lexer* lexer;
     Token curr_token;
+    size_t max_tokens; // Maximum number of tokens to read
 } Parser;
+
+ASTNodeList *nodelist_create() {
+    ASTNodeList *list = (ASTNodeList*)malloc(sizeof(ASTNodeList));
+    memset(list->data, 0, sizeof(list->data));
+    list->size = 0;
+    return list;
+}
+
+void nodelist_append(ASTNodeList *list, ASTNode *node) {
+    list->data[list->size] = node;
+    list->size++;
+}
+
+void nodelist_free(ASTNodeList *list) {
+    for (size_t i = 0; i < list->size; i++) {
+        free(list->data[i]);
+    }
+    free(list);
+}
 
 ASTNode* astnode_create_number(double value) {
     ASTNode* node = malloc(sizeof(ASTNode));
@@ -133,6 +167,7 @@ Parser* parser_create(Lexer* lexer) {
     Parser* parser = malloc(sizeof(Parser));
     parser->lexer = lexer;
     parser->curr_token = lexer_get_next_token(lexer);
+    parser->max_tokens = SIZE_MAX;
     return parser;
 }
 
@@ -159,6 +194,9 @@ ASTNode* parser_factor(Parser* parser) {
         case TOKEN_LPAREN:
             parser_eat(parser, TOKEN_LPAREN);
             node = parser_expr(parser);
+            if (ALLOW_INVALID_TREE && parser->curr_token.type != TOKEN_RPAREN) {
+                return node;
+            }
             parser_eat(parser, TOKEN_RPAREN);
             return node;
             
@@ -167,6 +205,9 @@ ASTNode* parser_factor(Parser* parser) {
             return astnode_create_unary('-', parser_factor(parser));
             
         default:
+            if (ALLOW_INVALID_TREE) {
+                return NULL;
+            }
             fprintf(stderr, "Syntax error in factor\n");
             exit(1);
     }
@@ -201,6 +242,11 @@ ASTNode* parser_expr(Parser* parser) {
 void ast_print(ASTNode* node, int depth) {
     for (int i = 0; i < depth; i++) {
         printf("  ");
+    }
+
+    if (node == NULL) {
+        printf("NULL\n");
+        return;
     }
     
     switch (node->type) {
@@ -291,9 +337,46 @@ ASTNode *ast_build(const char* expression) {
     return root;
 }
 
+ASTNode *ast_build_with_token_limit(const char* expression, size_t token_max) {
+    Lexer* lexer = lexer_create(expression);
+    lexer->token_max = token_max;
+    Parser* parser = parser_create(lexer);
+    ASTNode* root = parser_expr(parser);
+
+    free(parser);
+    free(lexer);
+    return root;
+}
+
+ASTNodeList *ast_build_stages(const char* expression) {
+    // Count tokens
+    Lexer* lexer = lexer_create(expression);
+    size_t token_count = 0;
+    while (lexer_get_next_token(lexer).type != TOKEN_EOF) token_count++;
+    
+    // Build ast stages list
+    ASTNodeList *list = nodelist_create();
+    for (size_t i = 0; i <= token_count; i++) {
+        nodelist_append(list, ast_build_with_token_limit(expression, i));
+    }
+    
+    return list;
+}
+
 double eval(const char* expression) {
     ASTNode* root = ast_build(expression);
     double result = ast_eval(root);
     ast_free(root);
     return result;
+}
+
+int main() {
+    const char* expression = "1 + 2 * 3";
+
+    ASTNodeList *list = ast_build_stages(expression);
+    for (size_t i = 0; i < list->size; i++) {
+        ast_print(list->data[i], 0);
+        printf("------------------------\n");
+    }
+    nodelist_free(list);
 }

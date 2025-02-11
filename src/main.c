@@ -50,42 +50,42 @@ static void draw_node_connections(Vector2 position, Vector2 childPosition, float
 static void draw_node(const ASTNode* node, Vector2 position, float zoom, Font font);
 static void cleanup_visualization(VisualizationState* state, ASTNode* rootNode);
 
-int main(void) {
-    SetConfigFlags(FLAG_MSAA_4X_HINT);
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "AST Visualizer");
+// int main(void) {
+//     SetConfigFlags(FLAG_MSAA_4X_HINT);
+//     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "AST Visualizer");
 
-    VisualizationState state;
-    initialize_visualization(&state);
+//     VisualizationState state;
+//     initialize_visualization(&state);
 
-    const char* expression = "-(1 + 2) * 3";
-    ASTNode* rootNode = ast_build(expression);
-    double result = rootNode ? ast_eval(rootNode) : 0.0;
+//     const char* expression = "1";
+//     ASTNode* rootNode = ast_build(expression);
+//     double result = rootNode ? ast_eval(rootNode) : 0.0;
 
-    SetTargetFPS(60);
+//     SetTargetFPS(60);
 
-    while (!WindowShouldClose()) {
-        handle_input(&state);
+//     while (!WindowShouldClose()) {
+//         handle_input(&state);
 
-        BeginDrawing();
-        {
-            ClearBackground(RAYWHITE);
+//         BeginDrawing();
+//         {
+//             ClearBackground(RAYWHITE);
 
-            // Calculate drawing position with pan offset
-            Vector2 drawRootPosition = Vector2Add(state.rootPosition, state.panOffset);
+//             // Calculate drawing position with pan offset
+//             Vector2 drawRootPosition = Vector2Add(state.rootPosition, state.panOffset);
 
-            // Draw the AST only if rootNode exists.
-            if (rootNode) {
-                draw_node(rootNode, drawRootPosition, state.zoomFactor, state.font);
-            }
+//             // Draw the AST only if rootNode exists.
+//             if (rootNode) {
+//                 draw_node(rootNode, drawRootPosition, state.zoomFactor, state.font);
+//             }
 
-            draw_info_text(&state, expression, result);
-        }
-        EndDrawing();
-    }
+//             draw_info_text(&state, expression, result);
+//         }
+//         EndDrawing();
+//     }
 
-    cleanup_visualization(&state, rootNode);
-    return 0;
-}
+//     cleanup_visualization(&state, rootNode);
+//     return 0;
+// }
 
 static void initialize_visualization(VisualizationState* state) {
     // Initialize state with default values
