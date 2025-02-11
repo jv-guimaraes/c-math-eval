@@ -22,6 +22,7 @@ typedef struct {
 
 typedef struct {
     const char* input;
+    size_t input_len;
     size_t position;
     char curr_char;
     size_t token_count;
@@ -37,6 +38,7 @@ void tokentype_print(TokenType type) {
 Lexer* lexer_create(const char* input) {
     Lexer* lexer = malloc(sizeof(Lexer));
     lexer->input = input;
+    lexer->input_len = strlen(input);
     lexer->position = 0;
     lexer->curr_char = input[0];
     lexer->token_count = 0;
@@ -46,7 +48,7 @@ Lexer* lexer_create(const char* input) {
 
 void lexer_advance(Lexer* lexer) {
     lexer->position++;
-    if (lexer->position < strlen(lexer->input)) {
+    if (lexer->position < lexer->input_len) {
         lexer->curr_char = lexer->input[lexer->position];
     } else {
         lexer->curr_char = '\0';
@@ -353,6 +355,7 @@ ASTNodeList *ast_build_stages(const char* expression) {
     Lexer* lexer = lexer_create(expression);
     size_t token_count = 0;
     while (lexer_get_next_token(lexer).type != TOKEN_EOF) token_count++;
+    free(lexer);
     
     // Build ast stages list
     ASTNodeList *list = nodelist_create();
