@@ -6,7 +6,7 @@ This program visualizes the Abstract Syntax Tree (AST) of a mathematical express
 
 ## Compilation:
 
-To compile it, use the following command:
+To compile the project, you'll typically use a command similar to the following (adjust paths as needed):
 
 ```bash
-gcc -Iinclude -Llib src/*.c -o build/calc.exe -lraylib -lopengl32 -lgdi32 -lwinmm
+gcc -Iinclude -Llib src/*.c -o calc -lraylib -lopengl32 -lgdi32 -lwinmm
