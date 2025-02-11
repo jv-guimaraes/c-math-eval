@@ -369,14 +369,3 @@ double eval(const char* expression) {
     ast_free(root);
     return result;
 }
-
-int main() {
-    const char* expression = "1 + 2 * 3";
-
-    ASTNodeList *list = ast_build_stages(expression);
-    for (size_t i = 0; i < list->size; i++) {
-        ast_print(list->data[i], 0);
-        printf("------------------------\n");
-    }
-    nodelist_free(list);
-}
