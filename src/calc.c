@@ -205,7 +205,11 @@ ASTNode* parser_factor(Parser* parser) {
         case TOKEN_MINUS:
             parser_eat(parser, TOKEN_MINUS);
             return astnode_create_unary('-', parser_factor(parser));
-            
+
+        case TOKEN_PLUS:
+            parser_eat(parser, TOKEN_PLUS);
+            return astnode_create_unary('+', parser_factor(parser));
+
         default:
             if (ALLOW_INVALID_TREE) {
                 return NULL;
@@ -300,6 +304,7 @@ double ast_eval(ASTNode* node) {
             
             switch (node->unary.operator) {
                 case '-': return -operand;
+                case '+': return operand;
                 default:
                     fprintf(stderr, "Error: Unknown unary operator %c\n", node->unary.operator);
                     exit(1);

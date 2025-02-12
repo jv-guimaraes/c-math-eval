@@ -78,10 +78,10 @@ int main(void) {
     SetConfigFlags(FLAG_MSAA_4X_HINT);
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "AST Stages Visualizer");
 
-    const char* expression = "1 + 2 * 3";
+    const char* expression = "1 - +2";
     VisualizationState state;
     initialize_visualization(&state, expression);
-
+    
     ASTNodeList* astStages = ast_build_stages(expression);
     double result = ast_eval(ast_build(expression));
 
